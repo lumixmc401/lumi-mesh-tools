@@ -1,0 +1,24 @@
+{
+  "name": "com.lumixmc401.meshtools",
+  "displayName": "Lumi Mesh Tools",
+  "version": "0.1.0",
+  "unity": "2022.3",
+  "description": "Small editor tools for fixing up meshes inside Unity, without a round trip through Blender.\n\nSymmetrize: rebuild a mesh so that one half is an exact mirror of the other, keeping blend shapes, bone weights, UVs, vertex colours and submeshes intact.",
+  "author": {
+    "name": "lumixmc401",
+    "url": "https://github.com/lumixmc401"
+  },
+  "license": "MIT",
+  "licensesUrl": "https://github.com/lumixmc401/lumi-mesh-tools/blob/main/LICENSE.md",
+  "url": "https://github.com/lumixmc401/lumi-mesh-tools",
+  "changelogUrl": "https://github.com/lumixmc401/lumi-mesh-tools/blob/main/CHANGELOG.md",
+  "documentationUrl": "https://github.com/lumixmc401/lumi-mesh-tools/blob/main/README.md",
+  "keywords": [
+    "vrchat",
+    "mesh",
+    "symmetry",
+    "mirror",
+    "editor"
+  ],
+  "vpmDependencies": {}
+}

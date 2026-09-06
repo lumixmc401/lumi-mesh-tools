@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      LISTING_TOKEN: ${{ secrets.LISTING_DISPATCH_TOKEN }}
+      LISTING_REPO: lumixmc401/lumi-vpm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME=$(python -c "import json;print(json.load(open('package.json'))['name'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "zip=$NAME-$VERSION.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Check the tag matches package.json
+        run: python .github/scripts/validate_package.py --expect-version "${{ steps.version.outputs.version }}"
+
+      - name: Build the package zip
+        run: |
+          zip -r "/tmp/${{ steps.version.outputs.zip }}" . \
+            -x '.git/*' '.github/*' '.gitignore'
+          mv "/tmp/${{ steps.version.outputs.zip }}" .
+
+      - name: Write release notes
+        run: python .github/scripts/changelog_section.py "${{ steps.version.outputs.version }}" > /tmp/notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.version.outputs.zip }}" \
+            package.json \
+            --title "${{ steps.version.outputs.name }} ${{ steps.version.outputs.version }}" \
+            --notes-file /tmp/notes.md
+
+      # Optional: without this the listing picks the release up on its own schedule instead.
+      - name: Ask the VPM listing to rebuild
+        if: env.LISTING_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.LISTING_DISPATCH_TOKEN }}
+        run: gh api -X POST "/repos/$LISTING_REPO/dispatches" -f event_type=package-released
