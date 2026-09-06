@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0]
 
 ### Added
+- **Proportional Edit** window (`Tools > Lumi Mesh Tools > Proportional Edit`): grab part of a
+  mesh, move, turn or scale it, and let the surrounding surface follow by a falloff — Blender's
+  proportional editing, for the garment that is simply worn crooked.
+  - Selection by open edge loop (a hem, collar or cuff — click it in the scene), by connected
+    shell, or with a brush.
+  - **Offset** holds the correction at full strength for a distance before the fade starts.
+    Without it the surface just outside the selection barely moves while the selection moves
+    fully, and that step shows up as a crease along the boundary.
+  - Distance measured along the surface rather than through space, so an edit on a hem does not
+    reach the far side of the skirt, plus a stitch distance that bridges the lace, charms and
+    straps that sit on a garment as separate shells — without it they get left behind.
+  - *Level the selection* fits a plane to a ring and turns it square to the nearest axis.
+  - Live preview, Apply/Cancel/Undo per edit, and bake to a `.asset` mesh. Blend shapes, UVs,
+    bind poses and every other channel are carried over untouched.
+
+### Fixed
+- Vertex colours are written back at the width the source used. Rebuilding an 8-bit colour
+  channel as floats changes the vertex stride, and a Skinned Mesh Renderer handed a stride it
+  did not expect stops drawing the mesh entirely.
+- Swapping a mesh on a Skinned Mesh Renderer clears the old reference first, so the renderer
+  rebuilds its skinning setup. Assigning straight over the top leaves it sized for the previous
+  vertex count and the garment goes invisible.
+- The rebuild now checks its output against the source's vertex layout and reports any channel
+  that came out a different width.
+
+### Added
 - **Symmetrize** window (`Tools > Lumi Mesh Tools > Symmetrize`): rebuilds a mesh so one
   half is an exact mirror of the other.
   - Automatic detection of the mirror axis and plane offset, with a confidence score.

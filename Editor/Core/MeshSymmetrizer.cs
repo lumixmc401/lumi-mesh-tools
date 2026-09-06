@@ -314,7 +314,7 @@ namespace LumiMeshTools.Editor
             mesh.SetVertices(positions);
             if (normals != null) mesh.SetNormals(normals);
             if (tangents != null) mesh.SetTangents(tangents);
-            if (colors != null) mesh.SetColors(colors);
+            if (colors != null) SetColors(mesh, colors, src.colorsAreBytes);
 
             for (int ch = 0; ch < MeshSnapshot.UvChannels; ch++)
             {
@@ -335,8 +335,39 @@ namespace LumiMeshTools.Editor
             mesh.RecalculateBounds();
 
             BuildBlendShapes(mesh, src, options, verts, mirrorOf, onPlane, kept, total, normal, report);
+            WarnOnLayoutDrift(mesh, src, report);
 
             return mesh;
+        }
+
+        /// <summary>
+        /// Checks the rebuilt mesh stores each channel the same way the source did.
+        ///
+        /// A width that does not match changes the vertex stride, and a SkinnedMeshRenderer given
+        /// a stride it did not expect stops drawing entirely — one console line and an invisible
+        /// garment. Worth naming rather than leaving to be discovered.
+        /// </summary>
+        static void WarnOnLayoutDrift(Mesh mesh, MeshSnapshot src, SymmetrizeReport report)
+        {
+            if (src.attributes == null) return;
+
+            foreach (var expected in src.attributes)
+            {
+                if (!mesh.HasVertexAttribute(expected.attribute))
+                {
+                    report.warnings.Add($"The rebuilt mesh lost its {expected.attribute} channel.");
+                    continue;
+                }
+
+                var format = mesh.GetVertexAttributeFormat(expected.attribute);
+                int dimension = mesh.GetVertexAttributeDimension(expected.attribute);
+                if (format == expected.format && dimension == expected.dimension) continue;
+
+                report.warnings.Add(
+                    $"{expected.attribute} came out as {format} x{dimension} but the source stored it as " +
+                    $"{expected.format} x{expected.dimension}. The vertex stride no longer matches, which can " +
+                    "stop a Skinned Mesh Renderer drawing the mesh at all.");
+            }
         }
 
         /// <summary>Appends a triangle, dropping the degenerate ones the cut can collapse.</summary>
@@ -537,6 +568,20 @@ namespace LumiMeshTools.Editor
         }
 
         // ---- Misc ---------------------------------------------------------------------------
+
+        /// <summary>Writes colours back in the width the source used, keeping the vertex stride.</summary>
+        static void SetColors(Mesh mesh, Color[] colors, bool asBytes)
+        {
+            if (!asBytes)
+            {
+                mesh.SetColors(colors);
+                return;
+            }
+
+            var packed = new Color32[colors.Length];
+            for (int i = 0; i < colors.Length; i++) packed[i] = colors[i];
+            mesh.SetColors(packed);
+        }
 
         static void SetUvChannel(Mesh mesh, int channel, Vector4[] values, int dimension)
         {

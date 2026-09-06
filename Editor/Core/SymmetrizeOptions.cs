@@ -3,22 +3,6 @@ using UnityEngine;
 
 namespace LumiMeshTools.Editor
 {
-    /// <summary>
-    /// How the seam relax fades with distance from the mirror plane. The same curves Blender
-    /// offers for proportional editing, and for the same reason: the plane is the centre the
-    /// correction radiates from, and which curve you pick decides whether the fix stays tight
-    /// against the join or feathers out across the panel.
-    /// </summary>
-    public enum SeamFalloff
-    {
-        Smooth,
-        Sphere,
-        Root,
-        Linear,
-        Sharp,
-        Constant,
-    }
-
     public sealed class SymmetrizeOptions
     {
         // ---- Mirror plane -------------------------------------------------------------------
@@ -78,7 +62,7 @@ namespace LumiMeshTools.Editor
         public int seamSmoothIterations = 3;
 
         /// <summary>Shape of the fade from the plane out to <see cref="seamSmoothWidth"/>.</summary>
-        public SeamFalloff seamFalloff = SeamFalloff.Smooth;
+        public FalloffCurve seamFalloff = FalloffCurve.Smooth;
 
         /// <summary>
         /// Blend recalculated normals into the smoothed band. Outside the band the mesh's own

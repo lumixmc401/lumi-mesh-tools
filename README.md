@@ -129,6 +129,34 @@ Regions marked to keep as-is skip all four stages and are copied straight throug
 
 ---
 
+## Using Proportional Edit
+
+Open **Tools → Lumi Mesh Tools → Proportional Edit**.
+
+This is the tool for a garment that is not really asymmetric, just *worn crooked* — a hem, a
+collar or a cuff that sits higher on one side than the other. It works the way Blender's
+proportional editing does: take hold of part of the mesh, move it, and everything nearby comes
+along by an amount that fades with distance.
+
+1. **Select.** *Loop* mode grabs a whole open edge loop when you click near it — a hem, a
+   collar, a cuff. *Island* takes a connected piece; *Brush* paints a selection on by hand.
+2. **Set the falloff.** *Radius* is how far the influence fades over. **Offset** holds it at
+   full strength for that distance first — this is what stops the correction pinching: fading
+   straight from full strength at the selection leaves the surface just outside it barely
+   moving while the selection moves fully, and that step reads as a crease. Push the offset out
+   past where the bend would land and it disappears.
+3. **Edit.** Drag the handle, or press *Level the selection* to fit a plane to a ring and turn
+   it square. *Apply* commits; *Cancel* backs it out; *Undo* steps back through committed edits.
+4. **Bake & Apply** saves the result and assigns it, as with Symmetrize.
+
+**Stitch pieces within** matters more than it sounds. Lace, charms and straps are usually
+separate shells laid against a garment rather than joined to it, and measuring distance along
+the surface walks straight past them — the garment moves and the trim stays behind, floating.
+Anything within the stitch distance of another piece is treated as attached. On a typical
+outfit a millimetre or two is enough.
+
+---
+
 ## 中文說明
 
 把 Unity 裡的 mesh 直接修一修的小工具,不用再繞去 Blender。
@@ -172,6 +200,26 @@ BlendShape(含多 frame、含 L/R 成對的單側 shape)、骨骼權重(依 L/R 
 *Falloff* 曲線,以鏡像平面為中心做比例衰減的鬆弛,就是 Blender 的 Proportional Editing 那一套)。
 
 又斜又單邊的部件分兩次做:先把其他區塊全部設成保留、只對它擬合平面並鏡射,再把啟用的區塊反過來。
+
+### Proportional Edit(比例編輯)
+
+開 **Tools → Lumi Mesh Tools → Proportional Edit**。
+
+這是給「本身不是不對稱,只是穿歪了」的衣物用的——下襬、領口、袖口一邊高一邊低。運作方式就是
+Blender 的 Proportional Editing:抓住網格的一部分去動,周圍會依距離衰減跟著動。
+
+1. **選取** — *Loop* 模式點一下就抓整圈開放邊界(下襬、領口、袖口);*Island* 抓整塊連通的殼;
+   *Brush* 用筆刷手動塗。
+2. **設定衰減** — *Radius* 是衰減的距離。**Offset** 則讓滿強度先維持這麼一段再開始衰減,這正是你說的
+   「影響範圍要超過一些」:如果從選取處直接開始衰減,選取的部分整個移動、旁邊卻幾乎不動,那個落差就會
+   變成一道折痕。把 Offset 推到折彎會發生的位置之外,折痕就消失了。
+3. **編輯** — 拖曳 handle,或按 *Level the selection* 自動擬合那圈的平面並轉正。*Apply* 確認、
+   *Cancel* 取消、*Undo* 回退已確認的編輯。
+4. **Bake & Apply** 存檔並指派,和 Symmetrize 一樣。
+
+**Stitch pieces within(縫合距離)** 比看起來重要:蕾絲、吊飾、繫帶通常是「疊在」衣服上的獨立殼,
+沿著表面量距離會直接繞過它們——衣服動了、裝飾留在原地飄著。距離另一塊在這個範圍內的就視為相連。
+一般服裝設一兩公釐就夠。
 
 已知限制:只支援三角面;接縫那排頂點的權重維持原樣不做對稱化;鏡射出來的那半共用原本那半的 UV;
 區塊是以「連通的殼」為單位,和主體連在一起的單邊細節沒辦法單獨挑出來;*Fit to mesh* 遇到非常大的

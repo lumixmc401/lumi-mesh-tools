@@ -20,6 +20,17 @@ namespace LumiMeshTools.Editor
         public Vector4[] tangents;  // null when the mesh has none
         public Color[] colors;      // null when the mesh has none
 
+        /// <summary>
+        /// True when the source stores vertex colours as bytes rather than floats. Writing them
+        /// back as floats would quadruple the size of that channel and change the vertex stride,
+        /// and a SkinnedMeshRenderer handed a mesh whose stride it did not expect refuses to draw
+        /// it at all — silently, apart from one line in the console.
+        /// </summary>
+        public bool colorsAreBytes;
+
+        /// <summary>The source's vertex layout, kept so the rebuild can be checked against it.</summary>
+        public VertexAttributeDescriptor[] attributes;
+
         public readonly List<Vector4>[] uvs = new List<Vector4>[UvChannels];
         public readonly int[] uvDimensions = new int[UvChannels];
 
@@ -67,6 +78,7 @@ namespace LumiMeshTools.Editor
                 name = mesh.name,
                 vertexCount = mesh.vertexCount,
                 positions = mesh.vertices,
+                attributes = mesh.GetVertexAttributes(),
             };
 
             // Meshes imported without 'Read/Write Enabled' are still readable from editor code,
@@ -79,7 +91,12 @@ namespace LumiMeshTools.Editor
 
             if (mesh.HasVertexAttribute(VertexAttribute.Normal)) s.normals = mesh.normals;
             if (mesh.HasVertexAttribute(VertexAttribute.Tangent)) s.tangents = mesh.tangents;
-            if (mesh.HasVertexAttribute(VertexAttribute.Color)) s.colors = mesh.colors;
+            if (mesh.HasVertexAttribute(VertexAttribute.Color))
+            {
+                s.colors = mesh.colors;
+                var format = mesh.GetVertexAttributeFormat(VertexAttribute.Color);
+                s.colorsAreBytes = format == VertexAttributeFormat.UNorm8 || format == VertexAttributeFormat.SNorm8;
+            }
 
             for (int ch = 0; ch < UvChannels; ch++)
             {

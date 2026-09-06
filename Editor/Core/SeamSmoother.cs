@@ -24,7 +24,7 @@ namespace LumiMeshTools.Editor
         /// </summary>
         public static float[] Apply(Vector3[] positions, List<int>[] submeshes,
             Vector3 planeNormal, Vector3 planePoint, float width, float strength, int iterations,
-            SeamFalloff falloffCurve, bool[] frozen, bool[] onPlane, float weldTolerance)
+            FalloffCurve falloffCurve, bool[] frozen, bool[] onPlane, float weldTolerance)
         {
             if (width <= 0f || strength <= 0f || iterations <= 0) return null;
 
@@ -54,7 +54,7 @@ namespace LumiMeshTools.Editor
 
                 if (isFrozen) continue; // a region the user asked to keep as-is stays put
                 float distance = Mathf.Abs(Vector3.Dot(groupPosition[g] - planePoint, normal));
-                falloff[g] = Weight(falloffCurve, Mathf.Clamp01(distance / width));
+                falloff[g] = Falloff.Weight(falloffCurve, Mathf.Clamp01(distance / width));
             }
 
             var next = new Vector3[groupCount];
@@ -131,21 +131,6 @@ namespace LumiMeshTools.Editor
                 var recalculated = accumulated[groupOf[i]];
                 if (recalculated.sqrMagnitude < 0.5f) continue;
                 normals[i] = Vector3.Slerp(normals[i], recalculated, weight).normalized;
-            }
-        }
-
-        /// <summary>Influence at <paramref name="t"/> of the way from the plane to the edge of the band.</summary>
-        public static float Weight(SeamFalloff falloff, float t)
-        {
-            float s = 1f - Mathf.Clamp01(t);
-            switch (falloff)
-            {
-                case SeamFalloff.Sphere: return Mathf.Sqrt(s * (2f - s));
-                case SeamFalloff.Root: return Mathf.Sqrt(s);
-                case SeamFalloff.Linear: return s;
-                case SeamFalloff.Sharp: return s * s;
-                case SeamFalloff.Constant: return t >= 1f ? 0f : 1f;
-                default: return s * s * (3f - 2f * s); // Smooth
             }
         }
 

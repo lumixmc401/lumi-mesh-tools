@@ -315,10 +315,10 @@ namespace LumiMeshTools.Editor.Tests
         [Test]
         public void EveryFalloffCurveRunsFromFullAtThePlaneToNothingAtTheRadius()
         {
-            foreach (SeamFalloff curve in System.Enum.GetValues(typeof(SeamFalloff)))
+            foreach (FalloffCurve curve in System.Enum.GetValues(typeof(FalloffCurve)))
             {
-                Assert.AreEqual(1f, SeamSmoother.Weight(curve, 0f), Tolerance, $"{curve} at the plane");
-                Assert.AreEqual(0f, SeamSmoother.Weight(curve, 1f), Tolerance, $"{curve} at the radius");
+                Assert.AreEqual(1f, Falloff.Weight(curve, 0f), Tolerance, $"{curve} at the plane");
+                Assert.AreEqual(0f, Falloff.Weight(curve, 1f), Tolerance, $"{curve} at the radius");
             }
         }
 

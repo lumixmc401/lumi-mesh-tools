@@ -320,7 +320,7 @@ namespace LumiMeshTools.Editor
 
                 using (new EditorGUI.DisabledScope(_options.seamSmoothWidth <= 0f))
                 {
-                    _options.seamFalloff = (SeamFalloff)EditorGUILayout.EnumPopup(
+                    _options.seamFalloff = (FalloffCurve)EditorGUILayout.EnumPopup(
                         new GUIContent("Falloff", "How the influence fades from the plane out to the radius, as in Blender's proportional editing."),
                         _options.seamFalloff);
                     _options.seamSmoothStrength = EditorGUILayout.Slider("Strength", _options.seamSmoothStrength, 0f, 1f);
@@ -779,6 +779,11 @@ namespace LumiMeshTools.Editor
             if (renderer == null) return;
             if (renderer is SkinnedMeshRenderer skinned)
             {
+                // A Skinned Mesh Renderer keeps a skinning buffer sized for the mesh it already
+                // had. Handing it one with a different vertex count without clearing the old
+                // reference first leaves that buffer stale and the renderer quietly stops drawing
+                // — one line in the console and an invisible garment. Clearing makes it rebuild.
+                skinned.sharedMesh = null;
                 skinned.sharedMesh = mesh;
                 return;
             }
