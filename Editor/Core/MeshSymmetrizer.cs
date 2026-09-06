@@ -64,6 +64,11 @@ namespace LumiMeshTools.Editor
 
             int CutVertex(int keep, int drop)
             {
+                // A corner that already sits on the plane *is* the cut point, so reuse it rather
+                // than stacking a coincident copy on the seam. Meshes authored with a centre row
+                // of vertices hit this on every triangle along the middle.
+                if (distance[keep] <= tol) return CopyVertex(keep);
+
                 long key = keep < drop
                     ? ((long)keep << 32) | (uint)drop
                     : ((long)drop << 32) | (uint)keep;
@@ -95,9 +100,7 @@ namespace LumiMeshTools.Editor
 
                     if (insideCount == 3)
                     {
-                        output.Add(CopyVertex(a));
-                        output.Add(CopyVertex(b));
-                        output.Add(CopyVertex(c));
+                        Emit(output, CopyVertex(a), CopyVertex(b), CopyVertex(c));
                         continue;
                     }
 
@@ -106,21 +109,15 @@ namespace LumiMeshTools.Editor
                     if (insideCount == 1)
                     {
                         while (!inside[a]) { int tmp = a; a = b; b = c; c = tmp; }
-                        output.Add(CopyVertex(a));
-                        output.Add(CutVertex(a, b));
-                        output.Add(CutVertex(a, c));
+                        Emit(output, CopyVertex(a), CutVertex(a, b), CutVertex(a, c));
                     }
                     else
                     {
                         while (inside[c]) { int tmp = a; a = b; b = c; c = tmp; }
                         int bc = CutVertex(b, c);
                         int ca = CutVertex(a, c);
-                        output.Add(CopyVertex(a));
-                        output.Add(CopyVertex(b));
-                        output.Add(bc);
-                        output.Add(CopyVertex(a));
-                        output.Add(bc);
-                        output.Add(ca);
+                        Emit(output, CopyVertex(a), CopyVertex(b), bc);
+                        Emit(output, CopyVertex(a), bc, ca);
                     }
                 }
             }
@@ -291,6 +288,15 @@ namespace LumiMeshTools.Editor
             BuildBlendShapes(mesh, src, options, verts, mirrorOf, onPlane, kept, total, axis, report);
 
             return mesh;
+        }
+
+        /// <summary>Appends a triangle, dropping the degenerate ones the cut can collapse.</summary>
+        static void Emit(List<int> output, int a, int b, int c)
+        {
+            if (a == b || b == c || a == c) return;
+            output.Add(a);
+            output.Add(b);
+            output.Add(c);
         }
 
         static void BuildBlendShapes(Mesh mesh, MeshSnapshot src, SymmetrizeOptions options,

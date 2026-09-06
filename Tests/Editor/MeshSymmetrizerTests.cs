@@ -72,6 +72,20 @@ namespace LumiMeshTools.Editor.Tests
         }
 
         [Test]
+        public void ReusesAnExistingCentreRowInsteadOfDuplicatingIt()
+        {
+            // The grid already has a column of vertices sitting on x = 0. Cutting there must land
+            // on those vertices rather than stack a coincident copy beside each one.
+            var mesh = BuildGrid(new[] { -1f, -0.5f, 0f, 0.5f, 1f }, new[] { 0f, 0.5f, 1f });
+
+            var result = Symmetrize(mesh, out var report);
+
+            Assert.AreEqual(3, report.seamVertexCount, "one seam vertex per row, not two");
+            Assert.AreEqual(mesh.vertexCount, result.vertexCount,
+                "a symmetric grid should rebuild to the same vertex count it started with");
+        }
+
+        [Test]
         public void KeepsTheChosenHalfUntouched()
         {
             var mesh = BuildGrid(new[] { -1f, -0.5f, 0f, 0.5f, 1f }, new[] { 0f, 1f });
