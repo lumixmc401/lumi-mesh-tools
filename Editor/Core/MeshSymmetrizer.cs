@@ -7,11 +7,14 @@ namespace LumiMeshTools.Editor
     /// <summary>
     /// Rebuilds a mesh so that one half is an exact mirror of the other.
     ///
-    /// The pass runs in three stages: cut the mesh against the mirror plane (splitting the
-    /// triangles that straddle it, so the source half needs no pre-existing centre seam),
-    /// weld what landed on the plane, then duplicate the survivors reflected across it.
-    /// Every per-vertex channel is carried through both stages, which is why blend shapes,
-    /// skin weights and UVs come out the far end intact.
+    /// The pass runs in stages: cut the mesh against the mirror plane (splitting the triangles
+    /// that straddle it, so the source half needs no pre-existing centre seam), weld what landed
+    /// on the plane, duplicate the survivors reflected across it, and optionally relax the band
+    /// around the join. Regions the caller marked to keep as-is skip all of that and are copied
+    /// straight through, which is how a deliberately one-sided piece survives.
+    ///
+    /// Every per-vertex channel is carried through each stage, which is why blend shapes, skin
+    /// weights and UVs come out the far end intact.
     /// </summary>
     public static class MeshSymmetrizer
     {
@@ -30,20 +33,26 @@ namespace LumiMeshTools.Editor
         public static Mesh Build(MeshSnapshot src, SymmetrizeOptions options, int[] boneMirror, SymmetrizeReport report)
         {
             report = report ?? new SymmetrizeReport();
-            int axis = Mathf.Clamp(options.axis, 0, 2);
+
+            var normal = options.planeNormal;
+            if (normal.sqrMagnitude < 1e-12f) normal = Vector3.right;
+            normal.Normalize();
+            var origin = options.planePoint;
+
             float side = options.keepPositiveSide ? 1f : -1f;
             float tol = Mathf.Max(options.seamTolerance, 1e-7f);
             int n = src.vertexCount;
-
             report.sourceVertexCount = n;
 
             // Signed distance to the plane, flipped so that positive always means "keep".
             var distance = new float[n];
             var inside = new bool[n];
+            var keepAsIs = new bool[n];
             for (int i = 0; i < n; i++)
             {
-                distance[i] = (src.positions[i][axis] - options.planeOffset) * side;
+                distance[i] = Vector3.Dot(src.positions[i] - origin, normal) * side;
                 inside[i] = distance[i] >= -tol;
+                keepAsIs[i] = options.IsKeptAsIs(i);
             }
 
             // ---- Stage 1: cut ------------------------------------------------------------
@@ -85,16 +94,28 @@ namespace LumiMeshTools.Editor
                 return index;
             }
 
-            var keptTriangles = new List<int>[src.submeshes.Length];
-            for (int sm = 0; sm < src.submeshes.Length; sm++)
+            int submeshCount = src.submeshes.Length;
+            var mirroredTriangles = new List<int>[submeshCount];
+            var throughTriangles = new List<int>[submeshCount];
+
+            for (int sm = 0; sm < submeshCount; sm++)
             {
                 var source = src.submeshes[sm];
-                var output = keptTriangles[sm] = new List<int>(source.Length);
+                var output = mirroredTriangles[sm] = new List<int>(source.Length);
+                var through = throughTriangles[sm] = new List<int>();
                 report.sourceTriangleCount += source.Length / 3;
 
                 for (int t = 0; t < source.Length; t += 3)
                 {
                     int a = source[t], b = source[t + 1], c = source[t + 2];
+
+                    if (keepAsIs[a] || keepAsIs[b] || keepAsIs[c])
+                    {
+                        Emit(through, CopyVertex(a), CopyVertex(b), CopyVertex(c));
+                        report.keptAsIsTriangleCount++;
+                        continue;
+                    }
+
                     int insideCount = (inside[a] ? 1 : 0) + (inside[b] ? 1 : 0) + (inside[c] ? 1 : 0);
                     if (insideCount == 0) continue;
 
@@ -130,16 +151,21 @@ namespace LumiMeshTools.Editor
                 return null;
             }
 
+            // Vertices that only ever appear in a kept-as-is triangle must not be mirrored.
+            var passthrough = new bool[kept];
+            foreach (var through in throughTriangles)
+                foreach (int index in through) passthrough[index] = true;
+
             // ---- Stage 2: classify the seam and lay out the mirrored half ------------------
             var onPlane = new bool[kept];
             var basePositions = new Vector3[kept];
             for (int k = 0; k < kept; k++)
             {
                 var p = Sample(src.positions, verts[k]);
-                if (options.weldSeam && Mathf.Abs(p[axis] - options.planeOffset) <= tol)
+                if (options.weldSeam && !passthrough[k] && Mathf.Abs(Vector3.Dot(p - origin, normal)) <= tol)
                 {
                     onPlane[k] = true;
-                    p[axis] = options.planeOffset;
+                    p -= Vector3.Dot(p - origin, normal) * normal;
                     report.seamVertexCount++;
                 }
                 basePositions[k] = p;
@@ -147,7 +173,7 @@ namespace LumiMeshTools.Editor
 
             var mirrorOf = new int[kept];
             int total = kept;
-            for (int k = 0; k < kept; k++) mirrorOf[k] = onPlane[k] ? k : total++;
+            for (int k = 0; k < kept; k++) mirrorOf[k] = onPlane[k] || passthrough[k] ? k : total++;
             report.resultVertexCount = total;
 
             // ---- Stage 3: fill every channel ---------------------------------------------
@@ -155,7 +181,7 @@ namespace LumiMeshTools.Editor
             for (int k = 0; k < kept; k++)
             {
                 positions[k] = basePositions[k];
-                if (mirrorOf[k] != k) positions[mirrorOf[k]] = ReflectPoint(basePositions[k], axis, options.planeOffset);
+                if (mirrorOf[k] != k) positions[mirrorOf[k]] = ReflectPoint(basePositions[k], normal, origin);
             }
 
             Vector3[] normals = null;
@@ -169,12 +195,11 @@ namespace LumiMeshTools.Editor
                     {
                         // Flattening the seam normal onto the plane is what makes the two halves
                         // shade continuously across the join.
-                        var flat = nrm;
-                        flat[axis] = 0f;
+                        var flat = nrm - Vector3.Dot(nrm, normal) * normal;
                         if (flat.sqrMagnitude > 1e-8f) nrm = flat.normalized;
                     }
                     normals[k] = nrm;
-                    if (mirrorOf[k] != k) normals[mirrorOf[k]] = ReflectVector(nrm, axis);
+                    if (mirrorOf[k] != k) normals[mirrorOf[k]] = ReflectVector(nrm, normal);
                 }
             }
 
@@ -186,12 +211,10 @@ namespace LumiMeshTools.Editor
                 {
                     var tan = SampleTangent(src.tangents, verts[k]);
                     tangents[k] = tan;
-                    if (mirrorOf[k] != k)
-                    {
-                        var mirrored = ReflectVector(new Vector3(tan.x, tan.y, tan.z), axis);
-                        // Reflection flips handedness, so the bitangent sign flips with it.
-                        tangents[mirrorOf[k]] = new Vector4(mirrored.x, mirrored.y, mirrored.z, -tan.w);
-                    }
+                    if (mirrorOf[k] == k) continue;
+                    var mirrored = ReflectVector(new Vector3(tan.x, tan.y, tan.z), normal);
+                    // Reflection flips handedness, so the bitangent sign flips with it.
+                    tangents[mirrorOf[k]] = new Vector4(mirrored.x, mirrored.y, mirrored.z, -tan.w);
                 }
             }
 
@@ -238,11 +261,11 @@ namespace LumiMeshTools.Editor
             }
 
             // ---- Triangles ----------------------------------------------------------------
-            var finalTriangles = new List<int>[src.submeshes.Length];
-            for (int sm = 0; sm < keptTriangles.Length; sm++)
+            var finalTriangles = new List<int>[submeshCount];
+            for (int sm = 0; sm < submeshCount; sm++)
             {
-                var source = keptTriangles[sm];
-                var output = finalTriangles[sm] = new List<int>(source.Count * 2);
+                var source = mirroredTriangles[sm];
+                var output = finalTriangles[sm] = new List<int>(source.Count * 2 + throughTriangles[sm].Count);
                 output.AddRange(source);
 
                 for (int t = 0; t < source.Count; t += 3)
@@ -256,7 +279,33 @@ namespace LumiMeshTools.Editor
                     output.Add(mirrorOf[c]);
                     output.Add(mirrorOf[b]);
                 }
+
+                output.AddRange(throughTriangles[sm]);
                 report.resultTriangleCount += output.Count / 3;
+            }
+
+            // ---- Stage 4: relax the seam ---------------------------------------------------
+            if (options.seamSmoothWidth > 0f)
+            {
+                var frozen = new bool[total];
+                var seam = new bool[total];
+                for (int k = 0; k < kept; k++)
+                {
+                    frozen[k] = passthrough[k];
+                    seam[k] = onPlane[k];
+                }
+
+                float weldTolerance = Mathf.Max(tol, 1e-6f);
+                var falloff = SeamSmoother.Apply(positions, finalTriangles, normal, origin,
+                    options.seamSmoothWidth, Mathf.Clamp01(options.seamSmoothStrength),
+                    Mathf.Max(1, options.seamSmoothIterations), options.seamFalloff, frozen, seam, weldTolerance);
+
+                if (falloff != null)
+                {
+                    foreach (float w in falloff) if (w > 0f) report.smoothedVertexCount++;
+                    if (options.recalculateSeamNormals)
+                        SeamSmoother.BlendNormals(positions, normals, finalTriangles, falloff, weldTolerance);
+                }
             }
 
             // ---- Assemble -----------------------------------------------------------------
@@ -279,13 +328,13 @@ namespace LumiMeshTools.Editor
                 if (src.bindposes != null) mesh.bindposes = src.bindposes;
             }
 
-            mesh.subMeshCount = finalTriangles.Length;
-            for (int sm = 0; sm < finalTriangles.Length; sm++)
+            mesh.subMeshCount = submeshCount;
+            for (int sm = 0; sm < submeshCount; sm++)
                 mesh.SetTriangles(finalTriangles[sm], sm, false);
 
             mesh.RecalculateBounds();
 
-            BuildBlendShapes(mesh, src, options, verts, mirrorOf, onPlane, kept, total, axis, report);
+            BuildBlendShapes(mesh, src, options, verts, mirrorOf, onPlane, kept, total, normal, report);
 
             return mesh;
         }
@@ -300,7 +349,7 @@ namespace LumiMeshTools.Editor
         }
 
         static void BuildBlendShapes(Mesh mesh, MeshSnapshot src, SymmetrizeOptions options,
-            List<VertexRef> verts, int[] mirrorOf, bool[] onPlane, int kept, int total, int axis,
+            List<VertexRef> verts, int[] mirrorOf, bool[] onPlane, int kept, int total, Vector3 normal,
             SymmetrizeReport report)
         {
             if (src.blendShapes.Count == 0) return;
@@ -329,12 +378,12 @@ namespace LumiMeshTools.Editor
                     var own = shape.frames[f];
                     var other = partner.frames[f];
 
-                    var dv = MirrorDeltas(own.deltaVertices, other.deltaVertices, verts, mirrorOf, onPlane, kept, total, axis, options.weldSeam);
+                    var dv = MirrorDeltas(own.deltaVertices, other.deltaVertices, verts, mirrorOf, onPlane, kept, total, normal, options.weldSeam);
                     var dn = own.deltaNormals != null || other.deltaNormals != null
-                        ? MirrorDeltas(own.deltaNormals, other.deltaNormals, verts, mirrorOf, onPlane, kept, total, axis, options.weldSeam)
+                        ? MirrorDeltas(own.deltaNormals, other.deltaNormals, verts, mirrorOf, onPlane, kept, total, normal, options.weldSeam)
                         : null;
                     var dt = own.deltaTangents != null || other.deltaTangents != null
-                        ? MirrorDeltas(own.deltaTangents, other.deltaTangents, verts, mirrorOf, onPlane, kept, total, axis, options.weldSeam)
+                        ? MirrorDeltas(own.deltaTangents, other.deltaTangents, verts, mirrorOf, onPlane, kept, total, normal, options.weldSeam)
                         : null;
 
                     mesh.AddBlendShapeFrame(shape.name, own.weight, dv, dn, dt);
@@ -343,34 +392,29 @@ namespace LumiMeshTools.Editor
         }
 
         static Vector3[] MirrorDeltas(Vector3[] own, Vector3[] partner, List<VertexRef> verts,
-            int[] mirrorOf, bool[] onPlane, int kept, int total, int axis, bool weldSeam)
+            int[] mirrorOf, bool[] onPlane, int kept, int total, Vector3 normal, bool weldSeam)
         {
             var result = new Vector3[total];
             for (int k = 0; k < kept; k++)
             {
                 var delta = Sample(own, verts[k]);
-                if (weldSeam && onPlane[k]) delta[axis] = 0f; // keep the seam on the plane while the shape plays
+                // Keep the seam on the plane while the shape plays, or the join splits open.
+                if (weldSeam && onPlane[k]) delta -= Vector3.Dot(delta, normal) * normal;
                 result[k] = delta;
 
                 if (mirrorOf[k] != k)
-                    result[mirrorOf[k]] = ReflectVector(Sample(partner, verts[k]), axis);
+                    result[mirrorOf[k]] = ReflectVector(Sample(partner, verts[k]), normal);
             }
             return result;
         }
 
         // ---- Reflection ---------------------------------------------------------------------
 
-        static Vector3 ReflectPoint(Vector3 p, int axis, float offset)
-        {
-            p[axis] = 2f * offset - p[axis];
-            return p;
-        }
+        static Vector3 ReflectPoint(Vector3 p, Vector3 normal, Vector3 origin)
+            => p - 2f * Vector3.Dot(p - origin, normal) * normal;
 
-        static Vector3 ReflectVector(Vector3 v, int axis)
-        {
-            v[axis] = -v[axis];
-            return v;
-        }
+        static Vector3 ReflectVector(Vector3 v, Vector3 normal)
+            => v - 2f * Vector3.Dot(v, normal) * normal;
 
         // ---- Sampling -----------------------------------------------------------------------
 
@@ -381,14 +425,10 @@ namespace LumiMeshTools.Editor
         }
 
         static Color Sample(Color[] values, VertexRef v)
-        {
-            return v.b < 0 ? values[v.a] : Color.LerpUnclamped(values[v.a], values[v.b], v.t);
-        }
+            => v.b < 0 ? values[v.a] : Color.LerpUnclamped(values[v.a], values[v.b], v.t);
 
         static Vector4 Sample(List<Vector4> values, VertexRef v)
-        {
-            return v.b < 0 ? values[v.a] : Vector4.LerpUnclamped(values[v.a], values[v.b], v.t);
-        }
+            => v.b < 0 ? values[v.a] : Vector4.LerpUnclamped(values[v.a], values[v.b], v.t);
 
         static Vector4 SampleTangent(Vector4[] values, VertexRef v)
         {
@@ -428,9 +468,7 @@ namespace LumiMeshTools.Editor
         }
 
         static int Remap(int bone, int[] boneMirror)
-        {
-            return bone >= 0 && bone < boneMirror.Length ? boneMirror[bone] : bone;
-        }
+            => bone >= 0 && bone < boneMirror.Length ? boneMirror[bone] : bone;
 
         static void AddInfluences(ref int count, BoneWeight bw, float scale)
         {

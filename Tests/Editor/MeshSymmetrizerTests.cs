@@ -49,7 +49,7 @@ namespace LumiMeshTools.Editor.Tests
 
             var result = Symmetrize(mesh, out var report);
 
-            AssertMirrorSymmetric(result, axis: 0, offset: 0f);
+            AssertMirrorSymmetric(result, Vector3.right, Vector3.zero);
             // The +x half was displaced, the -x half was not, so a symmetric result means the
             // displacement is gone.
             foreach (var v in result.vertices) Assert.AreEqual(0f, v.z, Tolerance);
@@ -68,7 +68,7 @@ namespace LumiMeshTools.Editor.Tests
             int onPlane = 0;
             foreach (var v in result.vertices) if (Mathf.Abs(v.x) < Tolerance) onPlane++;
             Assert.Greater(onPlane, 0, "expected the cut to introduce vertices on the mirror plane");
-            AssertMirrorSymmetric(result, axis: 0, offset: 0f);
+            AssertMirrorSymmetric(result, Vector3.right, Vector3.zero);
         }
 
         [Test]
@@ -156,33 +156,235 @@ namespace LumiMeshTools.Editor.Tests
             }
         }
 
+        [Test]
+        public void MirrorsAboutATiltedPlane()
+        {
+            // A piece modelled at an angle: the plane it is symmetric about is not an axis.
+            var normal = new Vector3(1f, 1f, 0f).normalized;
+            var mesh = BuildGrid(new[] { -1f, -0.5f, 0f, 0.5f, 1f }, new[] { 0f, 1f });
+
+            var options = BaseOptions();
+            options.planeNormal = normal;
+            options.planePoint = Vector3.zero;
+
+            var result = Build(mesh, options, out _);
+
+            AssertMirrorSymmetric(result, normal, Vector3.zero);
+        }
+
+        // ---- regions ------------------------------------------------------------------------
+
+        [Test]
+        public void SplitsDisconnectedShellsIntoRegions()
+        {
+            var mesh = Combine(
+                BuildGrid(new[] { -1f, 0f, 1f }, new[] { 0f, 1f }),
+                BuildGrid(new[] { 0.5f, 0.8f }, new[] { 2f, 2.2f }));
+
+            var snapshot = MeshSnapshot.Read(mesh, out string error);
+            Assert.IsNull(error, error);
+
+            MeshIslands.Build(snapshot, 1e-5f, out var islands);
+            Assert.AreEqual(2, islands.Count);
+        }
+
+        [Test]
+        public void CopiesAKeptAsIsRegionThroughUntouched()
+        {
+            // A one-sided ribbon parked off to the +x side, as its own shell.
+            var mesh = Combine(
+                BuildGrid(new[] { -1f, 0f, 1f }, new[] { 0f, 1f }),
+                BuildGrid(new[] { 0.5f, 0.8f }, new[] { 2f, 2.2f }));
+
+            var snapshot = MeshSnapshot.Read(mesh, out string error);
+            Assert.IsNull(error, error);
+            var islandOfVertex = MeshIslands.Build(snapshot, 1e-5f, out var islands);
+
+            // The ribbon is whichever island does not contain the origin-spanning grid.
+            int ribbon = islandOfVertex[snapshot.vertexCount - 1];
+
+            var options = BaseOptions();
+            options.islandOfVertex = islandOfVertex;
+            options.keptAsIsIslands = new HashSet<int> { ribbon };
+
+            var report = new SymmetrizeReport();
+            var result = MeshSymmetrizer.Build(snapshot, options, null, report);
+            Assert.IsNotNull(result);
+
+            int ribbonVertices = 0;
+            foreach (var v in result.vertices)
+            {
+                if (v.y < 1.5f) continue;
+                ribbonVertices++;
+                Assert.Greater(v.x, 0f, "the ribbon should not have been mirrored to the other side");
+            }
+            Assert.AreEqual(4, ribbonVertices, "the ribbon should come through with its own vertices only");
+            Assert.AreEqual(2, report.keptAsIsTriangleCount);
+        }
+
+        // ---- seam smoothing -------------------------------------------------------------------
+
+        [Test]
+        public void SmoothingFlattensTheRidgeTheMirrorLeaves()
+        {
+            // The kept half rises as it leaves the plane, so its reflection rises the other way
+            // and the two meet in a crease down the middle.
+            var mesh = BuildGrid(new[] { -1f, -0.75f, -0.5f, -0.25f, 0f }, new[] { 0f, 0.5f, 1f });
+            var sloped = mesh.vertices;
+            for (int i = 0; i < sloped.Length; i++) sloped[i].z = -sloped[i].x * 0.5f;
+            mesh.vertices = sloped;
+            mesh.RecalculateBounds();
+
+            var sharp = Symmetrize(mesh, out _);
+            float before = RidgeHeight(sharp);
+
+            var options = BaseOptions();
+            options.seamSmoothWidth = 0.6f;
+            options.seamSmoothStrength = 0.6f;
+            options.seamSmoothIterations = 5;
+            var smoothed = Build(mesh, options, out var report);
+            float after = RidgeHeight(smoothed);
+
+            Assert.Greater(before, 0.05f, "the unsmoothed mirror should have a visible crease");
+            Assert.Less(after, before * 0.75f, $"smoothing should flatten the crease ({before:0.####} → {after:0.####})");
+            Assert.Greater(report.smoothedVertexCount, 0);
+            AssertMirrorSymmetric(smoothed, Vector3.right, Vector3.zero);
+        }
+
+        /// <summary>How far the seam sits below the ridge either side of it, on the middle row.</summary>
+        static float RidgeHeight(Mesh mesh)
+        {
+            var positions = mesh.vertices;
+            float seamZ = 0f, sideZ = 0f;
+            int sideCount = 0;
+            foreach (var v in positions)
+            {
+                if (Mathf.Abs(v.y - 0.5f) > Tolerance) continue;
+                if (Mathf.Abs(v.x) < Tolerance) seamZ = v.z;
+                else if (Mathf.Abs(Mathf.Abs(v.x) - 0.25f) < Tolerance) { sideZ += v.z; sideCount++; }
+            }
+            return sideCount == 0 ? 0f : Mathf.Abs(sideZ / sideCount - seamZ);
+        }
+
+        // ---- plane fitting ----------------------------------------------------------------
+
+        [Test]
+        public void FitsAStraightPlaneWithoutInventingATilt()
+        {
+            var fit = SymmetryDetector.Fit(TaperedRidge(Quaternion.identity), out _);
+
+            Assert.Greater(fit.score, 0.95f);
+            Assert.Less(fit.tiltDegrees, 0.5f, "a square mesh should not be given a tilt");
+        }
+
+        [TestCase(5f)]
+        [TestCase(14f)]
+        [TestCase(27f)]
+        [TestCase(40f)]
+        public void FindsThePlaneAPieceWasModelledAround(float degrees)
+        {
+            // Mirroring a piece like this about a straight axis is what folds a ridge down its
+            // middle; the fix is to find the plane it is actually symmetric about.
+            var rotation = Quaternion.AngleAxis(degrees, Vector3.forward);
+            var fit = SymmetryDetector.Fit(TaperedRidge(rotation), out _);
+
+            float error = Vector3.Angle(fit.normal, rotation * Vector3.right);
+            error = Mathf.Min(error, 180f - error);
+
+            Assert.Greater(fit.score, 0.9f);
+            Assert.Less(error, 2f, $"fitted plane is {error:0.00}° off the true one");
+        }
+
+        /// <summary>A ridge that tapers along its length, so it is symmetric about one plane only.</summary>
+        static List<Vector3> TaperedRidge(Quaternion rotation)
+        {
+            var points = new List<Vector3>();
+            for (int j = 0; j < 11; j++)
+            for (int i = 0; i < 21; i++)
+            {
+                float x = -1f + 2f * i / 20f;
+                float y = j / 10f;
+                float taper = 0.35f + 0.65f * y;
+                points.Add(rotation * new Vector3(x * taper, y, (0.4f - 0.4f * Mathf.Abs(x)) * taper));
+            }
+            return points;
+        }
+
+        // ---- falloff ------------------------------------------------------------------------
+
+        [Test]
+        public void EveryFalloffCurveRunsFromFullAtThePlaneToNothingAtTheRadius()
+        {
+            foreach (SeamFalloff curve in System.Enum.GetValues(typeof(SeamFalloff)))
+            {
+                Assert.AreEqual(1f, SeamSmoother.Weight(curve, 0f), Tolerance, $"{curve} at the plane");
+                Assert.AreEqual(0f, SeamSmoother.Weight(curve, 1f), Tolerance, $"{curve} at the radius");
+            }
+        }
+
+        [Test]
+        public void SmoothingLeavesAKeptAsIsRegionWhereItWas()
+        {
+            var mesh = Combine(
+                BuildGrid(new[] { -1f, -0.5f, 0f, 0.5f, 1f }, new[] { 0f, 1f }),
+                BuildGrid(new[] { 0.5f, 0.8f }, new[] { 2f, 2.2f }));
+
+            var snapshot = MeshSnapshot.Read(mesh, out string error);
+            Assert.IsNull(error, error);
+            var islandOfVertex = MeshIslands.Build(snapshot, 1e-5f, out _);
+
+            var options = BaseOptions();
+            options.islandOfVertex = islandOfVertex;
+            options.keptAsIsIslands = new HashSet<int> { islandOfVertex[snapshot.vertexCount - 1] };
+            // Wide enough to swallow the ribbon if the relax were allowed to touch it.
+            options.seamSmoothWidth = 3f;
+            options.seamSmoothStrength = 1f;
+            options.seamSmoothIterations = 8;
+
+            var result = MeshSymmetrizer.Build(snapshot, options, null, new SymmetrizeReport());
+
+            foreach (var v in result.vertices)
+            {
+                if (v.y < 1.5f) continue;
+                bool untouched = Mathf.Abs(v.y - 2f) < Tolerance || Mathf.Abs(v.y - 2.2f) < Tolerance;
+                Assert.IsTrue(untouched, $"the kept-as-is ribbon was moved to {v}");
+            }
+        }
+
         // ---- helpers ----------------------------------------------------------------------
 
+        static SymmetrizeOptions BaseOptions()
+        {
+            var options = new SymmetrizeOptions { keepPositiveSide = false, seamTolerance = Tolerance };
+            options.SetAxisPlane(0, 0f);
+            return options;
+        }
+
         static Mesh Symmetrize(Mesh source, out SymmetrizeReport report, bool keepPositiveSide = false)
+        {
+            var options = BaseOptions();
+            options.keepPositiveSide = keepPositiveSide;
+            return Build(source, options, out report);
+        }
+
+        static Mesh Build(Mesh source, SymmetrizeOptions options, out SymmetrizeReport report)
         {
             var snapshot = MeshSnapshot.Read(source, out string error);
             Assert.IsNull(error, error);
 
             report = new SymmetrizeReport();
-            var options = new SymmetrizeOptions
-            {
-                axis = 0,
-                planeOffset = 0f,
-                keepPositiveSide = keepPositiveSide,
-                seamTolerance = Tolerance,
-            };
             var result = MeshSymmetrizer.Build(snapshot, options, null, report);
             Assert.IsNotNull(result);
             return result;
         }
 
-        static void AssertMirrorSymmetric(Mesh mesh, int axis, float offset)
+        static void AssertMirrorSymmetric(Mesh mesh, Vector3 planeNormal, Vector3 planePoint)
         {
+            var normal = planeNormal.normalized;
             var positions = mesh.vertices;
             foreach (var v in positions)
             {
-                var mirrored = v;
-                mirrored[axis] = 2f * offset - mirrored[axis];
+                var mirrored = v - 2f * Vector3.Dot(v - planePoint, normal) * normal;
 
                 bool found = false;
                 foreach (var other in positions)
@@ -207,7 +409,8 @@ namespace LumiMeshTools.Editor.Tests
             {
                 positions.Add(new Vector3(xs[i], ys[j], 0f));
                 normals.Add(new Vector3(0f, 0f, -1f));
-                uvs.Add(new Vector2((float)i / (xs.Length - 1), (float)j / (ys.Length - 1)));
+                uvs.Add(new Vector2(xs.Length == 1 ? 0f : (float)i / (xs.Length - 1),
+                                    ys.Length == 1 ? 0f : (float)j / (ys.Length - 1)));
             }
 
             var triangles = new List<int>();
@@ -220,6 +423,29 @@ namespace LumiMeshTools.Editor.Tests
                 int d = c + 1;
                 triangles.AddRange(new[] { a, c, b, b, c, d });
             }
+
+            mesh.SetVertices(positions);
+            mesh.SetNormals(normals);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(triangles, 0);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        /// <summary>Merges two meshes into one buffer, leaving them as separate shells.</summary>
+        static Mesh Combine(Mesh first, Mesh second)
+        {
+            var mesh = new Mesh { name = "Combined" };
+            var positions = new List<Vector3>(first.vertices);
+            var normals = new List<Vector3>(first.normals);
+            var uvs = new List<Vector2>(first.uv);
+            var triangles = new List<int>(first.triangles);
+
+            int offset = positions.Count;
+            positions.AddRange(second.vertices);
+            normals.AddRange(second.normals);
+            uvs.AddRange(second.uv);
+            foreach (int index in second.triangles) triangles.Add(index + offset);
 
             mesh.SetVertices(positions);
             mesh.SetNormals(normals);
