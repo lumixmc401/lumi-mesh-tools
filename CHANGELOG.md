@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     bind poses and every other channel are carried over untouched.
 
 ### Fixed
+- Both windows kept re-reading the mesh they were previewing. A live preview swaps a throwaway
+  copy onto the renderer, and the windows asked the renderer for "the" mesh every frame — so the
+  preview came back in as the source, no longer matched the mesh they had snapshotted, and
+  triggered a full reset on every repaint. In Proportional Edit that cleared the selection one
+  frame after it was made, so nothing could ever be moved and Bake wrote the source out unchanged.
+  In Symmetrize it cleared the kept-as-is regions and re-snapshotted the already-symmetrized
+  result, so each preview compounded on the last. While a preview is live the source is now the
+  mesh the window started from, and a preview mesh is never accepted as a source.
 - Vertex colours are written back at the width the source used. Rebuilding an 8-bit colour
   channel as floats changes the vertex stride, and a Skinned Mesh Renderer handed a stride it
   did not expect stops drawing the mesh entirely.

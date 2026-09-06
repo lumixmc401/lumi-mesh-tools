@@ -88,7 +88,11 @@ namespace LumiMeshTools.Editor
                 if (change.changed) SetRenderer(picked);
             }
 
-            var sourceMesh = SourceMeshOf(_renderer);
+            // While a preview is live the renderer is holding our throwaway copy. Asking the
+            // renderer for "the" mesh would feed that copy back in as the source, and since it is
+            // never the mesh we snapshotted, the re-read below would fire every single frame.
+            var sourceMesh = _previewMesh != null ? _originalMesh : SourceMeshOf(_renderer);
+            if (_previewMesh == null && _renderer != null) _originalMesh = sourceMesh;
             if (_renderer == null)
             {
                 EditorGUILayout.HelpBox("Pick a Skinned Mesh Renderer or a Mesh Renderer to symmetrize.", MessageType.Info);
@@ -592,6 +596,9 @@ namespace LumiMeshTools.Editor
 
         void EnsureSnapshot(Mesh mesh)
         {
+            // Our own preview copy is never a source: re-snapshotting it would fold the preview
+            // back into the thing being previewed.
+            if (mesh == null || mesh == _previewMesh) return;
             if (_snapshot != null && _snapshotOf == mesh) return;
 
             _snapshot = MeshSnapshot.Read(mesh, out string error);
