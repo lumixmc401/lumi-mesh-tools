@@ -348,9 +348,17 @@ namespace LumiMeshTools.Editor
                     "through; lower it if it stays stubbornly crooked."),
                 _clearanceWeight, 0f, 4f);
 
+            EditorGUILayout.HelpBox(
+                "Fit to body is experimental and does not work on a close-fitting garment yet. It " +
+                "solves for one rigid rotation, and on a garment whose parts are asymmetric by " +
+                "design those parts disagree about which way is level - straightening the straps " +
+                "tips the back panels further over. Check the result from behind as well as the " +
+                "front. Turning the handle by hand is the reliable route today.",
+                MessageType.Warning);
+
             using (new EditorGUI.DisabledScope(_selection.Count == 0 || _body == null || !_body.IsUsable))
             {
-                if (GUILayout.Button(new GUIContent("Fit to body",
+                if (GUILayout.Button(new GUIContent("Fit to body (experimental)",
                     "Solves for the rotation and offset that make the selection sit symmetrically " +
                     "on the body without lifting off it. Nothing is replaced - the result is an " +
                     "ordinary edit you can still adjust, apply or cancel."), GUILayout.Height(24f)))
