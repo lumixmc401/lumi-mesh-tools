@@ -79,6 +79,79 @@ namespace LumiMeshTools.Editor
             return Matrix4x4.TRS(position, rotation, scale) * Matrix4x4.Translate(-pivot);
         }
 
+        /// <summary>
+        /// Moves whole shells as units, overwriting whatever <see cref="Apply"/> wrote for them.
+        ///
+        /// Lace, buckles and charms sit on a garment as separate shells, and a falloff that fades
+        /// across one of them stretches it — a metal ring is not supposed to bend. Each listed
+        /// shell instead takes the average influence over its own vertices and moves by that much
+        /// of the motion, rigidly, so it keeps its shape and simply travels with the fabric.
+        /// </summary>
+        public static void ApplyRigidShells(Vector3[] result, Vector3[] basePositions, float[] weights,
+            int[] islandOfVertex, ICollection<int> rigidIslands, Vector3 pivot, Vector3 position,
+            Quaternion rotation, Vector3 scale)
+        {
+            if (islandOfVertex == null || rigidIslands == null || rigidIslands.Count == 0) return;
+
+            var total = new Dictionary<int, float>();
+            var count = new Dictionary<int, int>();
+            for (int i = 0; i < islandOfVertex.Length && i < weights.Length; i++)
+            {
+                int island = islandOfVertex[i];
+                if (island < 0 || !rigidIslands.Contains(island)) continue;
+                total.TryGetValue(island, out float sum);
+                count.TryGetValue(island, out int n);
+                total[island] = sum + weights[i];
+                count[island] = n + 1;
+            }
+
+            var matrices = new Dictionary<int, Matrix4x4>();
+            foreach (var pair in total)
+            {
+                float w = pair.Value / Mathf.Max(1, count[pair.Key]);
+                if (w <= 0f) continue;
+                // Interpolating the motion itself rather than the positions keeps this a true
+                // rotation at every strength; lerping positions would quietly shrink the shell.
+                matrices[pair.Key] = Matrix4x4.TRS(
+                    Vector3.Lerp(pivot, position, w),
+                    Quaternion.Slerp(Quaternion.identity, rotation, w),
+                    Vector3.Lerp(Vector3.one, scale, w)) * Matrix4x4.Translate(-pivot);
+            }
+
+            for (int i = 0; i < islandOfVertex.Length && i < result.Length; i++)
+            {
+                int island = islandOfVertex[i];
+                if (island < 0) continue;
+                if (matrices.TryGetValue(island, out var m)) result[i] = m.MultiplyPoint3x4(basePositions[i]);
+            }
+        }
+
+        /// <summary>
+        /// Every shell except the biggest. On a garment the biggest shell is the fabric and the
+        /// rest is trim, which is exactly the split <see cref="ApplyRigidShells"/> wants.
+        /// </summary>
+        public static HashSet<int> TrimShells(int[] islandOfVertex)
+        {
+            var result = new HashSet<int>();
+            if (islandOfVertex == null) return result;
+
+            var count = new Dictionary<int, int>();
+            foreach (int island in islandOfVertex)
+            {
+                if (island < 0) continue;
+                count.TryGetValue(island, out int n);
+                count[island] = n + 1;
+            }
+
+            int biggest = -1, most = -1;
+            foreach (var pair in count)
+                if (pair.Value > most) { most = pair.Value; biggest = pair.Key; }
+
+            foreach (var pair in count)
+                if (pair.Key != biggest) result.Add(pair.Key);
+            return result;
+        }
+
         /// <summary>Centre of a selection, used as the pivot the handle turns and scales about.</summary>
         public static Vector3 Centre(MeshGraph graph, ICollection<int> selection)
         {

@@ -157,6 +157,38 @@ outfit a millimetre or two is enough.
 
 ---
 
+## Fitting a garment to the body
+
+Bought clothing is often not worn straight: a waistband rides higher on one side, a hem sits
+crooked. The obvious fix — make the garment symmetric — is usually the wrong one, because the
+asymmetry you want gone and the asymmetry the designer intended are mixed together in the same
+mesh. Mirroring one half onto the other levels the garment and throws the design away with it.
+
+**Fit to body** separates the two. It never replaces geometry: it works out a single rotation and
+offset for the part you selected, and applies it through the normal falloff.
+
+1. In **Body reference**, assign the avatar's body mesh — the skin, not clothing. Avatars split
+   into several skins need every one the garment overlaps; a chest-and-up mesh listed for
+   something worn at the hips measures nothing, and the tool will say so.
+2. **Centre from** seeds the mirror plane, normally the avatar root or its hips. Only the
+   direction is taken from it; the exact position is fitted to the body mesh, because a rig can
+   sit a few millimetres off the skin it drives. The panel reports how symmetric the body turned
+   out to be — if that number is not small, nothing measured against it means anything.
+3. Select the part that is crooked, set the falloff, and press **Fit to body**.
+
+The panel then reports what it did and what is left. What is left over is the two sides genuinely
+being different shapes — that is the design, and it should stay.
+
+**Why the body and not the garment's own mirror?** Because the garment cannot be trusted to say
+where its own centre is. On the piece this was built against, the garment was 22mm off at the
+median and 43mm at worst, while the body under it was symmetric to 0.00mm.
+
+**Rigid trim** is on by default and matters more than it sounds. Lace, buckles and charms are
+separate shells laid on a garment, and a falloff that fades across a metal ring stretches it. With
+this on, each shell moves as a whole piece instead.
+
+---
+
 ## 中文說明
 
 把 Unity 裡的 mesh 直接修一修的小工具,不用再繞去 Blender。
@@ -220,6 +252,31 @@ Blender 的 Proportional Editing:抓住網格的一部分去動,周圍會依距�
 **Stitch pieces within(縫合距離)** 比看起來重要:蕾絲、吊飾、繫帶通常是「疊在」衣服上的獨立殼,
 沿著表面量距離會直接繞過它們——衣服動了、裝飾留在原地飄著。距離另一塊在這個範圍內的就視為相連。
 一般服裝設一兩公釐就夠。
+
+### Fit to body(以身體為基準校正)
+
+買來的衣服常常不是穿正的:腰帶一邊高一邊低、下襬歪掉。直覺的作法是「讓衣服左右對稱」,但那通常是錯的
+——你想消掉的歪斜,和設計者刻意做的不對稱,混在同一份 mesh 裡。把一半鏡射到另一半,衣服是正了,設計
+也一起沒了。
+
+**Fit to body** 把這兩件事分開。它不取代任何幾何,只針對你選取的部分求出一個旋轉和位移,再透過一般的
+falloff 套用出去。
+
+1. 在 **Body reference** 指定角色的身體 mesh(皮膚,不是衣服)。身體拆成好幾塊的角色,要把衣服有
+   重疊到的每一塊都列進去;拿「胸部以上」的 mesh 去量腰部的衣服,量到的是空的——工具會直接告訴你。
+2. **Centre from** 用來決定對稱平面的方向,通常填角色根物件或 Hips。**只取方向**,精確位置是拿身體
+   mesh 自己擬合出來的,因為骨架可能跟它驅動的皮膚差個幾公釐。面板會顯示身體本身的對稱度——如果那個
+   數字不夠小,任何拿它當基準量出來的東西都不能信。
+3. 選取歪掉的部分,設好 falloff,按 **Fit to body**。
+
+面板會告訴你它轉了多少、移了多少,以及還剩多少。**剩下的就是兩邊形狀本來就不一樣**——那是設計,應該
+留著。
+
+**為什麼用身體而不用衣服自己的鏡像?** 因為衣服講不出自己的中心在哪。開發時用的那件,衣服自己偏了
+22 mm(中位數,最大 43 mm),而它底下的身體對稱到 0.00 mm。
+
+**Rigid trim(剛體飾件)** 預設開啟,比看起來重要:蕾絲、扣環、吊飾都是疊在衣服上的獨立殼,falloff
+從中間淡出會把金屬環拉變形。開著的話,每個殼會整塊一起移動。
 
 已知限制:只支援三角面;接縫那排頂點的權重維持原樣不做對稱化;鏡射出來的那半共用原本那半的 UV;
 區塊是以「連通的殼」為單位,和主體連在一起的單邊細節沒辦法單獨挑出來;*Fit to mesh* 遇到非常大的

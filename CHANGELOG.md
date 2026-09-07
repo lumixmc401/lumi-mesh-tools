@@ -22,6 +22,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Live preview, Apply/Cancel/Undo per edit, and bake to a `.asset` mesh. Blend shapes, UVs,
     bind poses and every other channel are carried over untouched.
 
+### Added
+- **Fit to body** in Proportional Edit. Point it at the avatar's body mesh and it solves for the
+  rotation and offset that put the selection back where it belongs, then feeds that through the
+  ordinary falloff.
+  - The mirror plane comes from the body, not the garment. A garment is rarely symmetric enough to
+    say where its own centre is — one measured here was 22mm out at the median — while the body
+    under it fitted to 0.00mm, so that is what the plane is taken from. Direction comes from the
+    armature, exact position from the body mesh.
+  - Two things are balanced: how far the garment is from symmetric, and how evenly it sits off the
+    skin. Symmetry alone will happily lift a waistband off the hips to win a millimetre; fit alone
+    is blind, because a band can slide right round the body and still hug it everywhere.
+  - Measured in bind pose. A posed body carries the pose's own asymmetry — 5.1mm on a test avatar
+    against 0.15mm in bind pose — which would poison the reference.
+  - Residuals are capped, so trim that is asymmetric on purpose cannot drag the fit. Nothing is
+    replaced: every piece keeps its own shape and is simply carried along.
+- **Rigid trim.** Lace, buckles and charms sit on a garment as separate shells, and a falloff
+  fading across one stretches it — a metal ring is not supposed to bend. Each such shell now takes
+  the average influence over its own vertices and moves by that much of the motion, rigidly.
+
 ### Fixed
 - Both windows kept re-reading the mesh they were previewing. A live preview swaps a throwaway
   copy onto the renderer, and the windows asked the renderer for "the" mesh every frame — so the

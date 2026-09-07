@@ -30,6 +30,11 @@ namespace LumiMeshTools.Editor
         [SerializeField] float _stitchDistance;
         [SerializeField] bool _fixNormals = true;
         [SerializeField] bool _showLoops = true;
+        [SerializeField] List<Renderer> _bodyRenderers = new List<Renderer>();
+        [SerializeField] Transform _planeSource;
+        [SerializeField] bool _rigidTrim = true;
+        [SerializeField] float _clearanceWeight = 1f;
+        [SerializeField] bool _showBodySection = true;
 
         readonly ProportionalEdit.Settings _settings = new ProportionalEdit.Settings();
         readonly HashSet<int> _selection = new HashSet<int>();
@@ -50,6 +55,10 @@ namespace LumiMeshTools.Editor
         Vector3 _handlePosition;
         Quaternion _handleRotation = Quaternion.identity;
         Vector3 _handleScale = Vector3.one;
+
+        BodyReference _body;
+        HashSet<int> _trimShells;
+        string _fitSummary;
 
         Mesh _originalMesh;
         Mesh _previewMesh;
@@ -133,6 +142,9 @@ namespace LumiMeshTools.Editor
 
             EditorGUILayout.Space();
             DrawFalloffSection();
+
+            EditorGUILayout.Space();
+            DrawBodySection();
 
             EditorGUILayout.Space();
             DrawEditSection();
@@ -237,6 +249,140 @@ namespace LumiMeshTools.Editor
             EditorGUILayout.LabelField($"{reached:N0} vertices are within reach", EditorStyles.miniLabel);
         }
 
+        void DrawBodySection()
+        {
+            _showBodySection = EditorGUILayout.Foldout(_showBodySection, "Body reference", true,
+                EditorStyles.foldoutHeader);
+            if (!_showBodySection) return;
+
+            EditorGUILayout.HelpBox(
+                "A garment is rarely symmetric enough to say where its own centre is, so the mirror " +
+                "plane is taken from the body instead. The body is also what keeps the correction " +
+                "wearable: without it, levelling a waistband can lift it clean off the hips.",
+                MessageType.None);
+
+            using (var change = new EditorGUI.ChangeCheckScope())
+            {
+                for (int i = 0; i < _bodyRenderers.Count; i++)
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        _bodyRenderers[i] = (Renderer)EditorGUILayout.ObjectField(
+                            i == 0 ? "Body meshes" : " ", _bodyRenderers[i], typeof(Renderer), true);
+                        if (GUILayout.Button("-", GUILayout.Width(22f)))
+                        {
+                            _bodyRenderers.RemoveAt(i);
+                            GUI.changed = true;
+                            break;
+                        }
+                    }
+                }
+                if (GUILayout.Button("Add a body mesh"))
+                {
+                    _bodyRenderers.Add(null);
+                    GUI.changed = true;
+                }
+
+                _planeSource = (Transform)EditorGUILayout.ObjectField(
+                    new GUIContent("Centre from",
+                        "Transform whose right axis seeds the mirror plane - the avatar root, or its " +
+                        "hips. The exact offset is then fitted to the body mesh itself."),
+                    _planeSource, typeof(Transform), true);
+
+                if (change.changed)
+                {
+                    _body = null;
+                    _fitSummary = null;
+                }
+            }
+
+            var bodies = ActiveBodyRenderers();
+            if (bodies.Count == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "Assign the avatar's body mesh - the skin, not clothing. On avatars split into " +
+                    "several skins, list every one the garment overlaps.",
+                    MessageType.Info);
+                return;
+            }
+
+            EnsureBody();
+            if (_body != null && !float.IsNaN(_body.symmetryResidual))
+                EditorGUILayout.LabelField(
+                    $"Reference: {_body.positions.Length:N0} body points, symmetric to " +
+                    $"{_body.symmetryResidual * 1000f:0.00} mm",
+                    EditorStyles.miniLabel);
+            if (_body != null)
+                foreach (var warning in _body.warnings)
+                    EditorGUILayout.HelpBox(warning, MessageType.Warning);
+
+            _clearanceWeight = EditorGUILayout.Slider(
+                new GUIContent("Stay on the body",
+                    "How much keeping an even gap to the body matters against getting symmetric. " +
+                    "Raise it if the fit pulls the garment off the skin; lower it if the garment " +
+                    "stays stubbornly crooked."),
+                _clearanceWeight, 0f, 4f);
+
+            using (new EditorGUI.DisabledScope(_selection.Count == 0 || _body == null || !_body.IsUsable))
+            {
+                if (GUILayout.Button(new GUIContent("Fit to body",
+                    "Solves for the rotation and offset that make the selection sit symmetrically " +
+                    "on the body without lifting off it. Nothing is replaced - the result is an " +
+                    "ordinary edit you can still adjust, apply or cancel."), GUILayout.Height(24f)))
+                {
+                    FitToBody();
+                }
+            }
+
+            if (!string.IsNullOrEmpty(_fitSummary))
+                EditorGUILayout.HelpBox(_fitSummary, MessageType.Info);
+        }
+
+        List<Renderer> ActiveBodyRenderers()
+        {
+            var result = new List<Renderer>();
+            foreach (var r in _bodyRenderers)
+                if (r != null && !result.Contains(r)) result.Add(r);
+            return result;
+        }
+
+        void EnsureBody()
+        {
+            if (_body != null || _renderer == null) return;
+            var bodies = ActiveBodyRenderers();
+            if (bodies.Count == 0) return;
+
+            var source = _planeSource;
+            if (source == null && _renderer is SkinnedMeshRenderer skinned && skinned.rootBone != null)
+                source = skinned.rootBone;
+            _body = BodyReference.Build(_renderer, bodies, source);
+        }
+
+        void FitToBody()
+        {
+            EnsureBody();
+            if (_body == null || !_body.IsUsable || _committed == null || _weights == null) return;
+
+            var settings = new BodyFit.Settings { clearanceWeight = _clearanceWeight };
+            var report = BodyFit.Solve(_committed, _weights, _pivot, _body, settings);
+
+            _handlePosition = report.position;
+            _handleRotation = report.rotation;
+            _handleScale = Vector3.one;
+            UpdateWorking();
+
+            float angle = Quaternion.Angle(Quaternion.identity, report.rotation);
+            float shift = (report.position - _pivot).magnitude * 1000f;
+            _fitSummary =
+                $"Turned {angle:0.0} deg, moved {shift:0.0} mm.\n" +
+                $"Off-centre: {report.mirrorBefore * 1000f:0.0} mm -> {report.mirrorAfter * 1000f:0.0} mm.  " +
+                $"Unevenness against the body: {report.clearanceBefore * 1000f:0.0} mm -> " +
+                $"{report.clearanceAfter * 1000f:0.0} mm.\n" +
+                "Apply to keep it, Cancel to back it out. What is left over is the two sides " +
+                "genuinely being different shapes, which is the design and should stay.";
+            Repaint();
+        }
+
         void DrawEditSection()
         {
             EditorGUILayout.LabelField("Edit", EditorStyles.boldLabel);
@@ -276,6 +422,13 @@ namespace LumiMeshTools.Editor
                 using (new EditorGUI.DisabledScope(_selection.Count == 0))
                 {
                     _fixNormals = GUILayout.Toggle(_fixNormals, "Fix normals", EditorStyles.miniButton);
+                    using (var trimChange = new EditorGUI.ChangeCheckScope())
+                    {
+                        _rigidTrim = GUILayout.Toggle(_rigidTrim, new GUIContent("Rigid trim",
+                            "Move lace, buckles and charms as whole pieces instead of stretching " +
+                            "them across the falloff."), EditorStyles.miniButton);
+                        if (trimChange.changed) UpdateWorking();
+                    }
                 }
                 if (GUILayout.Button("Bake & Apply")) Bake();
             }
@@ -453,6 +606,9 @@ namespace LumiMeshTools.Editor
             if (renderer == _renderer) return;
             StopPreview();
             _renderer = renderer;
+            _body = null;
+            _trimShells = null;
+            _fitSummary = null;
             _originalMesh = SourceMeshOf(renderer);
             _snapshot = null;
             _snapshotOf = null;
@@ -479,6 +635,7 @@ namespace LumiMeshTools.Editor
             if (_stitchDistance <= 0f) _stitchDistance = extent * 0.01f;
             _graph = MeshGraph.Build(_snapshot, weldTolerance, _stitchDistance);
             _islandOfVertex = MeshIslands.Build(_snapshot, weldTolerance, out _);
+            _trimShells = null;
 
             _committed = (Vector3[])_snapshot.positions.Clone();
             _working = (Vector3[])_committed.Clone();
@@ -531,6 +688,13 @@ namespace LumiMeshTools.Editor
             {
                 var transform = ProportionalEdit.HandleTransform(_pivot, _handlePosition, _handleRotation, _handleScale);
                 ProportionalEdit.Apply(_working, _committed, _weights, transform);
+
+                if (_rigidTrim)
+                {
+                    if (_trimShells == null) _trimShells = ProportionalEdit.TrimShells(_islandOfVertex);
+                    ProportionalEdit.ApplyRigidShells(_working, _committed, _weights, _islandOfVertex,
+                        _trimShells, _pivot, _handlePosition, _handleRotation, _handleScale);
+                }
             }
 
             PushToPreview();
