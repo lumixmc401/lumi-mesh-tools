@@ -140,6 +140,10 @@ along by an amount that fades with distance.
 
 1. **Select.** *Loop* mode grabs a whole open edge loop when you click near it — a hem, a
    collar, a cuff. *Island* takes a connected piece; *Brush* paints a selection on by hand.
+   *Band* takes everything past a cut line — click where the crooked part starts, or drag the
+   slider. Band is the one to reach for when a garment has no ring to grab: plenty of pieces have
+   a single open boundary running the whole height, which Loop cannot use, and picking "the top
+   40mm" by brush is fiddly.
 2. **Set the falloff.** *Radius* is how far the influence fades over. **Offset** holds it at
    full strength for that distance first — this is what stops the correction pinching: fading
    straight from full strength at the selection leaves the surface just outside it barely
@@ -261,6 +265,13 @@ Blender 的 Proportional Editing:抓住網格的一部分去動,周圍會依距�
 
 **Fit to body** 把這兩件事分開。它不取代任何幾何,只針對你選取的部分求出一個旋轉和位移,再透過一般的
 falloff 套用出去。
+
+選取方式除了 Loop / Island / Brush,還有 **Band**:沿某個方向切一刀,取其中一側。點模型上「歪掉的部分
+從哪裡開始」,或直接拉滑桿。方向是用世界座標描述的(上下 / 左右 / 前後),會自動換算到 mesh 自己的座標系
+——衣服的建模方向什麼都有,不能假設。
+
+**什麼時候該用 Band:** 當衣服沒有一圈可抓的封閉邊界時。很多件的開放邊界只有一條、而且縱貫整件高度,
+Loop 抓不到;Island 會抓到整片;用 Brush 慢慢塗出「上緣 40 mm」很難塗準。
 
 1. 在 **Body reference** 指定角色的身體 mesh(皮膚,不是衣服)。身體拆成好幾塊的角色,要把衣服有
    重疊到的每一塊都列進去;拿「胸部以上」的 mesh 去量腰部的衣服,量到的是空的——工具會直接告訴你。

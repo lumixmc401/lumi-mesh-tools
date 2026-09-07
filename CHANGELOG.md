@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     bind poses and every other channel are carried over untouched.
 
 ### Added
+- **Band** selection: everything past a cut line. Click the model where the crooked part starts,
+  or drag the slider. The direction is named in world terms (up/down, left/right, front/back) and
+  converted into the mesh's own space, because garments are modelled in every orientation going.
+  The existing modes could not express "the top of this garment": a hem with no closed ring has
+  nothing for Loop to grab, Island takes the whole piece, and Brush means painting a band by hand.
 - **Fit to body** in Proportional Edit. Point it at the avatar's body mesh and it solves for the
   rotation and offset that put the selection back where it belongs, then feeds that through the
   ordinary falloff.

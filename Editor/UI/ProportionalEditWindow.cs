@@ -19,7 +19,7 @@ namespace LumiMeshTools.Editor
         const string DefaultOutputFolder = "Assets/LumiMeshTools/Generated";
         const int MaxUndoSteps = 24;
 
-        enum SelectMode { Loop, Island, Brush }
+        enum SelectMode { Loop, Island, Brush, Band }
         enum HandleMode { Move, Rotate, Scale }
 
         [SerializeField] Renderer _renderer;
@@ -35,6 +35,9 @@ namespace LumiMeshTools.Editor
         [SerializeField] bool _rigidTrim = true;
         [SerializeField] float _clearanceWeight = 1f;
         [SerializeField] bool _showBodySection = true;
+        [SerializeField] int _bandAxis = 1;        // 0 right, 1 up, 2 forward, in world terms
+        [SerializeField] bool _bandAbove = true;
+        [SerializeField] float _bandCut = 0.62f;   // where the cut sits across the mesh, 0..1
 
         readonly ProportionalEdit.Settings _settings = new ProportionalEdit.Settings();
         readonly HashSet<int> _selection = new HashSet<int>();
@@ -165,8 +168,12 @@ namespace LumiMeshTools.Editor
             using (var change = new EditorGUI.ChangeCheckScope())
             {
                 _selectMode = (SelectMode)GUILayout.Toolbar((int)_selectMode,
-                    new[] { "Loop", "Island", "Brush" }, GUILayout.Height(20f));
-                if (change.changed) SceneView.RepaintAll();
+                    new[] { "Loop", "Island", "Brush", "Band" }, GUILayout.Height(20f));
+                if (change.changed)
+                {
+                    if (_selectMode == SelectMode.Band) SelectBand();
+                    SceneView.RepaintAll();
+                }
             }
 
             switch (_selectMode)
@@ -185,6 +192,24 @@ namespace LumiMeshTools.Editor
                     {
                         _brushRadius = EditorGUILayout.FloatField("Brush radius", _brushRadius);
                         if (change.changed) SceneView.RepaintAll();
+                    }
+                    break;
+                case SelectMode.Band:
+                    EditorGUILayout.LabelField(
+                        "Everything past a cut line. Click the model where the crooked part starts, " +
+                        "or drag the slider.", EditorStyles.miniLabel);
+                    using (var change = new EditorGUI.ChangeCheckScope())
+                    {
+                        using (new EditorGUILayout.HorizontalScope())
+                        {
+                            _bandAxis = EditorGUILayout.Popup("Direction", _bandAxis,
+                                new[] { "Left / right", "Up / down", "Front / back" });
+                            _bandAbove = GUILayout.Toggle(_bandAbove,
+                                _bandAbove ? "Keep the far side" : "Keep the near side",
+                                EditorStyles.miniButton, GUILayout.Width(120f));
+                        }
+                        _bandCut = EditorGUILayout.Slider("Cut at", _bandCut, 0f, 1f);
+                        if (change.changed) SelectBand();
                     }
                     break;
             }
@@ -577,6 +602,15 @@ namespace LumiMeshTools.Editor
                         if (_islandOfVertex[i] == island) _selection.Add(_graph.groupOfVertex[i]);
                     break;
                 }
+                case SelectMode.Band:
+                {
+                    var axis = BandAxis();
+                    MeasureBand(axis, out float low, out float high);
+                    if (high - low > 1e-6f)
+                        _bandCut = Mathf.Clamp01((Vector3.Dot(point, axis) - low) / (high - low));
+                    SelectBand();
+                    break;
+                }
                 default:
                     if (e.shift) ProportionalEdit.RemoveWithin(_graph, point, _brushRadius, _selection);
                     else ProportionalEdit.AddWithin(_graph, point, _brushRadius, _selection);
@@ -587,6 +621,54 @@ namespace LumiMeshTools.Editor
             RebuildWeights();
             e.Use();
             Repaint();
+        }
+
+        /// <summary>
+        /// The chosen world direction, in the mesh's own space. Garments are modelled in every
+        /// orientation going — the piece this was built against has its own +Z pointing at the
+        /// ceiling — so the direction has to be named in world terms and converted, not assumed.
+        /// </summary>
+        Vector3 BandAxis()
+        {
+            var world = _bandAxis == 0 ? Vector3.right : _bandAxis == 2 ? Vector3.forward : Vector3.up;
+            if (_renderer == null) return world;
+            var local = _renderer.transform.worldToLocalMatrix.MultiplyVector(world);
+            return local.sqrMagnitude > 1e-8f ? local.normalized : world;
+        }
+
+        void MeasureBand(Vector3 axis, out float low, out float high)
+        {
+            low = float.MaxValue;
+            high = float.MinValue;
+            if (_graph == null) return;
+            for (int g = 0; g < _graph.groupCount; g++)
+            {
+                float d = Vector3.Dot(_graph.positionOfGroup[g], axis);
+                if (d < low) low = d;
+                if (d > high) high = d;
+            }
+        }
+
+        void SelectBand()
+        {
+            if (_graph == null) return;
+            if (HasPendingEdit) CommitEdit();
+
+            var axis = BandAxis();
+            MeasureBand(axis, out float low, out float high);
+            if (high - low <= 1e-6f) return;
+
+            float cut = Mathf.Lerp(low, high, _bandCut);
+            _selection.Clear();
+            for (int g = 0; g < _graph.groupCount; g++)
+            {
+                float d = Vector3.Dot(_graph.positionOfGroup[g], axis);
+                if (_bandAbove ? d >= cut : d <= cut) _selection.Add(g);
+            }
+
+            _error = null;
+            RebuildWeights();
+            SceneView.RepaintAll();
         }
 
         // ---- State --------------------------------------------------------------------------
