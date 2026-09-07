@@ -46,6 +46,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fading across one stretches it — a metal ring is not supposed to bend. Each such shell now takes
   the average influence over its own vertices and moves by that much of the motion, rigidly.
 
+### Known limitations
+- **Fit to body does not yet produce a usable result on a close-fitting garment.** It finds a good
+  answer on some selections — on the test piece, off-centre 11.1mm to 1.5mm with only 4 of 6567
+  edges changed by more than 2mm — and finds nothing at all on others, returning 11.1mm unchanged.
+  Where it does correct, it still ends up about 2mm inside the skin against 0.7mm before. A solve
+  also takes around ten seconds, which is too slow for a button.
+  The cause is the model rather than the tuning: one rigid transform pushed through a falloff
+  cannot both localise a correction and stay on the body. A narrow falloff localises but drags the
+  transition band; a wide one is smooth but amounts to moving the whole garment, which cannot fix
+  an internal tilt at all — measured at 1.2 degrees and no improvement. What this needs instead is
+  a move constrained to the body surface, where each point keeps its own distance from the skin,
+  so clipping is impossible by construction rather than by penalty.
+
 ### Fixed
 - Both windows kept re-reading the mesh they were previewing. A live preview swaps a throwaway
   copy onto the renderer, and the windows asked the renderer for "the" mesh every frame — so the

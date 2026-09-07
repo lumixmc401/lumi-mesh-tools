@@ -103,8 +103,85 @@ namespace LumiMeshTools.Editor.Tests
             Assert.Less(report.mirrorAfter, report.mirrorBefore * 0.35f,
                 $"the fit should take out most of the tilt ({report.mirrorBefore * 1000f:0.00}mm " +
                 $"-> {report.mirrorAfter * 1000f:0.00}mm)");
-            Assert.Less(report.clearanceAfter, report.clearanceBefore + 0.001f,
-                "and it must not achieve that by lifting the band off the body");
+            Assert.GreaterOrEqual(report.deepestAfter, report.deepestBefore - 0.0005f,
+                "and it must not achieve that by sinking into the body");
+        }
+
+        [Test]
+        public void WillNotBuySymmetryBySinkingIntoTheBody()
+        {
+            // Scoring the *evenness* of the gap instead of its floor let an earlier version push
+            // the garment clean through the skin: a uniform sink has zero spread, a perfect score.
+            Torso(0f, out var bodyPositions, out var bodyNormals);
+            var reference = Reference(bodyPositions, bodyNormals, Vector3.right, 0f);
+
+            var crooked = Waistband(0f);
+            var tilt = Quaternion.AngleAxis(14f, Vector3.forward);
+            for (int i = 0; i < crooked.Length; i++) crooked[i] = tilt * crooked[i];
+
+            var weights = new float[crooked.Length];
+            for (int i = 0; i < weights.Length; i++) weights[i] = 1f;
+
+            var pivot = Vector3.zero;
+            foreach (var p in crooked) pivot += p;
+            pivot /= crooked.Length;
+
+            var report = BodyFit.Solve(crooked, weights, pivot, reference, new BodyFit.Settings());
+
+            var settled = new Vector3[crooked.Length];
+            ProportionalEdit.Apply(settled, crooked, weights,
+                ProportionalEdit.HandleTransform(pivot, report.position, report.rotation, Vector3.one));
+
+            var samples = BodyFit.SampleIndices(settled.Length);
+            float deepest = BodyFit.DeepestPenetration(settled, reference, samples);
+            Assert.Greater(deepest, -0.002f,
+                $"the band ended up {deepest * 1000f:0.0}mm inside the body");
+        }
+
+        [Test]
+        public void WillNotBuySymmetryByTearingTheTransitionBand()
+        {
+            // A rigid motion pushed through a falloff shears whatever is in the fade. Unless the
+            // strain is priced in, the solver trades shape for symmetry - 60% on a real garment.
+            Torso(0f, out var bodyPositions, out var bodyNormals);
+            var reference = Reference(bodyPositions, bodyNormals, Vector3.right, 0f);
+
+            // a strip running down the torso, so part of it is held and part is moved
+            var strip = new List<Vector3>();
+            var triangles = new List<int>();
+            const int Rows = 24;
+            for (int row = 0; row < Rows; row++)
+            {
+                float y = 0.05f + 0.30f * row / (Rows - 1);
+                strip.Add(new Vector3(-0.02f, y, RingRadius));
+                strip.Add(new Vector3(0.02f, y, RingRadius));
+            }
+            for (int row = 0; row < Rows - 1; row++)
+            {
+                int i = row * 2;
+                triangles.AddRange(new[] { i, i + 2, i + 1, i + 1, i + 2, i + 3 });
+            }
+
+            var snapshot = new MeshSnapshot
+            {
+                positions = strip.ToArray(),
+                vertexCount = strip.Count,
+                submeshes = new[] { triangles.ToArray() },
+            };
+            var topology = BodyFit.Topology.Build(snapshot);
+
+            // full strength at the top, nothing at the bottom: the fade is the whole strip
+            var weights = new float[strip.Count];
+            for (int i = 0; i < weights.Length; i++)
+                weights[i] = Mathf.Clamp01((i / 2) / (float)(Rows - 1));
+
+            var positions = strip.ToArray();
+            var pivot = positions[positions.Length - 1];
+            var report = BodyFit.Solve(positions, weights, pivot, reference,
+                new BodyFit.Settings(), topology);
+
+            Assert.Less(report.worstStrain, 0.25f,
+                $"the fade was stretched by {report.worstStrain * 100f:0} %");
         }
 
         [Test]

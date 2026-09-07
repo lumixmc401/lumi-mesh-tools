@@ -60,6 +60,7 @@ namespace LumiMeshTools.Editor
         Vector3 _handleScale = Vector3.one;
 
         BodyReference _body;
+        BodyFit.Topology _topology;
         HashSet<int> _trimShells;
         string _fitSummary;
 
@@ -343,9 +344,8 @@ namespace LumiMeshTools.Editor
 
             _clearanceWeight = EditorGUILayout.Slider(
                 new GUIContent("Stay on the body",
-                    "How much keeping an even gap to the body matters against getting symmetric. " +
-                    "Raise it if the fit pulls the garment off the skin; lower it if the garment " +
-                    "stays stubbornly crooked."),
+                    "How hard sinking into the skin is punished. Raise it if the garment clips " +
+                    "through; lower it if it stays stubbornly crooked."),
                 _clearanceWeight, 0f, 4f);
 
             using (new EditorGUI.DisabledScope(_selection.Count == 0 || _body == null || !_body.IsUsable))
@@ -388,8 +388,8 @@ namespace LumiMeshTools.Editor
             EnsureBody();
             if (_body == null || !_body.IsUsable || _committed == null || _weights == null) return;
 
-            var settings = new BodyFit.Settings { clearanceWeight = _clearanceWeight };
-            var report = BodyFit.Solve(_committed, _weights, _pivot, _body, settings);
+            var settings = new BodyFit.Settings { penetrationWeight = 60f * _clearanceWeight };
+            var report = BodyFit.Solve(_committed, _weights, _pivot, _body, settings, _topology);
 
             _handlePosition = report.position;
             _handleRotation = report.rotation;
@@ -400,11 +400,18 @@ namespace LumiMeshTools.Editor
             float shift = (report.position - _pivot).magnitude * 1000f;
             _fitSummary =
                 $"Turned {angle:0.0} deg, moved {shift:0.0} mm.\n" +
-                $"Off-centre: {report.mirrorBefore * 1000f:0.0} mm -> {report.mirrorAfter * 1000f:0.0} mm.  " +
-                $"Unevenness against the body: {report.clearanceBefore * 1000f:0.0} mm -> " +
-                $"{report.clearanceAfter * 1000f:0.0} mm.\n" +
+                $"Off-centre: {report.mirrorBefore * 1000f:0.0} mm -> {report.mirrorAfter * 1000f:0.0} mm.\n" +
+                $"Deepest into the body: {report.deepestBefore * 1000f:0.0} mm -> " +
+                $"{report.deepestAfter * 1000f:0.0} mm.  Worst stretch: {report.worstStrain * 100f:0.0} %.\n" +
                 "Apply to keep it, Cancel to back it out. What is left over is the two sides " +
                 "genuinely being different shapes, which is the design and should stay.";
+
+            if (report.deepestAfter < report.deepestBefore - 0.0005f)
+                _fitSummary += "\n\nThis pushes further into the body than it started. Raise " +
+                    "\"Stay on the body\".";
+            if (report.worstStrain > 0.15f)
+                _fitSummary += "\n\nThe transition band is stretched hard. Widen the falloff " +
+                    "Radius so the correction is spread over more surface.";
             Repaint();
         }
 
@@ -689,6 +696,7 @@ namespace LumiMeshTools.Editor
             StopPreview();
             _renderer = renderer;
             _body = null;
+            _topology = null;
             _trimShells = null;
             _fitSummary = null;
             _originalMesh = SourceMeshOf(renderer);
@@ -718,6 +726,7 @@ namespace LumiMeshTools.Editor
             _graph = MeshGraph.Build(_snapshot, weldTolerance, _stitchDistance);
             _islandOfVertex = MeshIslands.Build(_snapshot, weldTolerance, out _);
             _trimShells = null;
+            _topology = BodyFit.Topology.Build(_snapshot);
 
             _committed = (Vector3[])_snapshot.positions.Clone();
             _working = (Vector3[])_committed.Clone();
